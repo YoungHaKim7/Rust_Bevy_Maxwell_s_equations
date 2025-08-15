@@ -1,0 +1,8 @@
+[package]
+name = "Rust_Bevy_Maxwell_s_equations"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bevy = "0.14"
+bytemuck = "1.16"
