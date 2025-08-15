@@ -78,7 +78,10 @@ fn main() {
         .add_systems(Startup, setup)
         .add_systems(
             Update,
-            ((fdtd_step_system, upload_texture_system).chain(), camera_controls),
+            (
+                (fdtd_step_system, upload_texture_system).chain(),
+                camera_controls,
+            ),
         )
         .run();
 }
@@ -99,12 +102,11 @@ fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
 
     let handle = images.add(image);
     commands.insert_resource(FieldTexture(handle.clone()));
-    commands.spawn(bevy::core_2d::Camera2dBundle::default());
-    commands.spawn(bevy::sprite::SpriteBundle {
-        texture: handle,
-        transform: Transform::from_scale(Vec3::splat(3.0)),
-        ..Default::default()
-    });
+    // Spawn a camera looking at the entities to show what's happening in this example.
+    commands.spawn((
+        Camera3d::default(),
+        Transform::from_xyz(3.0, 3.0, 3.0).looking_at(Vec3::ZERO, Vec3::Y),
+    ));
 
     let g = Grid::new(NX, NY, DX, DY);
     info!("Δt = {:.3e} s, c0Δt/Δx ≈ {:.3}", g.dt, c0() * g.dt / DX);
