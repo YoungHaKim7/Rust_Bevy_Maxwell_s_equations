@@ -1,28 +1,39 @@
-use bevy::input::mouse::MouseWheel;
 use bevy::prelude::*;
 use bevy::render::render_asset::RenderAssetUsages;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat, TextureUsages};
 use bytemuck::{Pod, Zeroable};
 
+mod camera;
+use camera::{pan_orbit_camera, PanOrbitCamera};
+
 /// Physical constants (SI)
-const EPS0: f32 = 8.854_187e-12;
-const MU0: f32 = 4.0 * std::f32::consts::PI * 1.0e-7;
+const EPS0: f32 = 8.854_187e-12; // Permittivity of free space
+const MU0: f32 = 4.0 * std::f32::consts::PI * 1.0e-7; // Permeability of free space
+
+/// Speed of light in vacuum
 fn c0() -> f32 {
     1.0 / (MU0 * EPS0).sqrt()
 }
 
-/// Simulation grid
-const NX: usize = 300;
-const NY: usize = 200;
-const DX: f32 = 1.0;
-const DY: f32 = 1.0;
+/// Simulation grid parameters
+const NX: usize = 300; // Number of grid points in x
+const NY: usize = 200; // Number of grid points in y
+const DX: f32 = 1.0; // Grid spacing in x
+const DY: f32 = 1.0; // Grid spacing in y
+const SUBSTEPS: usize = 4; // Number of simulation steps per frame
+
+/// Courant-Friedrichs-Lewy (CFL) number for stability
 const CFL: f32 = 0.5;
-const SUBSTEPS: usize = 4;
+
+/// Damping border parameters for absorbing boundary conditions
 const DAMP_BORDER: usize = 8;
 const DAMP_STRENGTH: f32 = 0.015;
-const SRC_AMP: f32 = 1.0;
-const SRC_STD_STEPS: f32 = 12.0;
 
+/// Source parameters
+const SRC_AMP: f32 = 1.0; // Amplitude of the source
+const SRC_STD_STEPS: f32 = 12.0; // Standard deviation of the Gaussian source pulse
+
+/// The `Grid` resource holds the state of the FDTD simulation.
 #[derive(Resource)]
 struct Grid {
     nx: usize,
@@ -30,15 +41,16 @@ struct Grid {
     dx: f32,
     dy: f32,
     dt: f32,
-    ez: Vec<f32>,
-    hx: Vec<f32>,
-    hy: Vec<f32>,
-    viz_scale: f32,
-    step: u64,
+    ez: Vec<f32>, // z-component of the electric field
+    hx: Vec<f32>, // x-component of the magnetic field
+    hy: Vec<f32>, // y-component of the magnetic field
+    viz_scale: f32, // Scaling factor for visualization
+    step: u64,      // Simulation step counter
 }
 
 impl Grid {
     fn new(nx: usize, ny: usize, dx: f32, dy: f32) -> Self {
+        // The time step `dt` is chosen to satisfy the CFL stability condition.
         let dt = CFL / (c0() * (1.0 / dx.powi(2) + 1.0 / dy.powi(2)).sqrt());
         Self {
             nx,
@@ -53,12 +65,15 @@ impl Grid {
             step: 0,
         }
     }
+
+    /// Helper function to get the 1D index from 2D grid coordinates.
     #[inline]
     fn idx(&self, i: usize, j: usize) -> usize {
         j * self.nx + i
     }
 }
 
+/// A simple RGBA color struct for the texture.
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct Rgba8 {
@@ -68,25 +83,42 @@ struct Rgba8 {
     a: u8,
 }
 
+/// The `FieldTexture` resource holds the handle to the image used for visualization.
 #[derive(Resource)]
 struct FieldTexture(Handle<Image>);
+
+/// Enum to select which field to visualize.
+#[derive(Resource, Default, Debug, PartialEq, Eq, Hash, States, Clone, Copy)]
+enum VizField {
+    #[default]
+    Ez,
+    Hx,
+    Hy,
+}
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins.set(ImagePlugin::default_nearest()))
         .insert_resource(Grid::new(NX, NY, DX, DY))
+        .init_resource::<VizField>()
         .add_systems(Startup, setup)
         .add_systems(
             Update,
             (
                 (fdtd_step_system, upload_texture_system).chain(),
-                camera_controls,
+                pan_orbit_camera,
+                toggle_viz_field,
             ),
         )
         .run();
 }
 
-fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
+fn setup(
+    mut commands: Commands,
+    mut images: ResMut<Assets<Image>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+) {
     let mut image = Image::new_fill(
         Extent3d {
             width: NX as u32,
@@ -100,28 +132,51 @@ fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
     );
     image.texture_descriptor.usage |= TextureUsages::COPY_DST;
 
-    let handle = images.add(image);
+    let handle = images.add(image.clone());
     commands.insert_resource(FieldTexture(handle.clone()));
-    // Spawn a camera looking at the entities to show what's happening in this example.
+
+    // Spawn a plane to display the visualization texture.
+    commands.spawn(PbrBundle {
+        mesh: meshes.add(shape::Plane::from_size(5.0).into()),
+        material: materials.add(StandardMaterial {
+            base_color_texture: Some(handle),
+            unlit: true,
+            ..default()
+        }),
+        ..default()
+    });
+
+    // Spawn the camera
+    let translation = Vec3::new(0.0, 0.0, 5.0);
+    let radius = translation.length();
     commands.spawn((
-        Camera3d::default(),
-        Transform::from_xyz(3.0, 3.0, 3.0).looking_at(Vec3::ZERO, Vec3::Y),
+        Camera3dBundle {
+            transform: Transform::from_translation(translation).looking_at(Vec3::ZERO, Vec3::Y),
+            ..default()
+        },
+        PanOrbitCamera { radius, ..default() },
     ));
 
     let g = Grid::new(NX, NY, DX, DY);
     info!("Δt = {:.3e} s, c0Δt/Δx ≈ {:.3}", g.dt, c0() * g.dt / DX);
+    info!("Press E to visualize Ez field");
+    info!("Press H to visualize Hx field");
+    info!("Press Y to visualize Hy field");
 }
 
+/// This system runs the FDTD simulation for a few substeps.
 fn fdtd_step_system(mut grid: ResMut<Grid>) {
     for _ in 0..SUBSTEPS {
         update_h(&mut grid);
-        inject_source(&mut grid);
+        inject_source(grid);
         update_e(&mut grid);
         apply_simple_absorbing(&mut grid);
         grid.step += 1;
     }
 }
 
+/// Update the magnetic field (H) based on the curl of the electric field (E).
+/// This is Faraday's Law: ∇ × E = -∂B/∂t
 fn update_h(grid: &mut Grid) {
     let nx = grid.nx;
     let ny = grid.ny;
@@ -146,6 +201,8 @@ fn update_h(grid: &mut Grid) {
     }
 }
 
+/// Update the electric field (E) based on the curl of the magnetic field (H).
+/// This is Ampere-Maxwell's Law: ∇ × H = J + ∂D/∂t
 fn update_e(grid: &mut Grid) {
     let nx = grid.nx;
     let ny = grid.ny;
@@ -163,6 +220,7 @@ fn update_e(grid: &mut Grid) {
         }
     }
 
+    // Set electric field to zero on the boundaries (Perfect Electric Conductor)
     for i in 0..nx {
         let top = grid.idx(i, 0);
         grid.ez[top] = 0.0;
@@ -177,7 +235,9 @@ fn update_e(grid: &mut Grid) {
     }
 }
 
-fn inject_source(grid: &mut Grid) {
+/// Inject a source into the grid.
+/// Here we use a Gaussian pulse to excite the Ez field.
+fn inject_source(mut grid: ResMut<Grid>) {
     let i0 = grid.nx / 2;
     let j0 = grid.ny / 2;
     let t = grid.step as f32;
@@ -196,6 +256,7 @@ fn inject_source(grid: &mut Grid) {
     }
 }
 
+/// Apply a simple absorbing boundary condition to prevent reflections from the boundaries.
 fn apply_simple_absorbing(grid: &mut Grid) {
     let nx = grid.nx;
     let ny = grid.ny;
@@ -223,23 +284,30 @@ fn apply_simple_absorbing(grid: &mut Grid) {
     }
 }
 
+/// This system uploads the selected field data to a texture for visualization.
 fn upload_texture_system(
     grid: Res<Grid>,
     field_tex: Res<FieldTexture>,
     mut images: ResMut<Assets<Image>>,
+    viz_field: Res<VizField>,
 ) {
     if let Some(img) = images.get_mut(&field_tex.0) {
         let mut pixels: Vec<Rgba8> = Vec::with_capacity(grid.nx * grid.ny);
-        for j in 0..grid.ny {
-            for i in 0..grid.nx {
-                let ez = grid.ez[grid.idx(i, j)] * grid.viz_scale;
-                let x = ez.clamp(-1.0, 1.0);
-                let r = ((x.max(0.0)) * 255.0) as u8;
-                let b = ((-x.max(0.0)) * 255.0) as u8;
-                let g = (255.0 - ((x.abs()) * 255.0 * 0.5)).clamp(0.0, 255.0) as u8;
-                pixels.push(Rgba8 { r, g, b, a: 255 });
-            }
+        let field_to_viz = match *viz_field {
+            VizField::Ez => &grid.ez,
+            VizField::Hx => &grid.hx,
+            VizField::Hy => &grid.hy,
+        };
+
+        for val in field_to_viz.iter() {
+            let x = val * grid.viz_scale;
+            let x = x.clamp(-1.0, 1.0);
+            let r = ((x.max(0.0)) * 255.0) as u8;
+            let b = ((-x.max(0.0)) * 255.0) as u8;
+            let g = (255.0 - ((x.abs()) * 255.0 * 0.5)).clamp(0.0, 255.0) as u8;
+            pixels.push(Rgba8 { r, g, b, a: 255 });
         }
+
         img.resize(Extent3d {
             width: grid.nx as u32,
             height: grid.ny as u32,
@@ -249,32 +317,18 @@ fn upload_texture_system(
     }
 }
 
-fn camera_controls(
-    mut q_cam: Query<(&mut Transform, &mut Projection), With<Camera>>,
-    mut scroll_evr: EventReader<MouseWheel>,
-    mouse: Res<ButtonInput<MouseButton>>,
-    windows: Query<&Window>,
-    mut last_pos: Local<Option<Vec2>>,
-    mut cursor_evr: EventReader<CursorMoved>,
-) {
-    if let Ok((mut tf, mut proj)) = q_cam.single_mut() {
-        if let Projection::Orthographic(ortho) = proj.as_mut() {
-            for ev in scroll_evr.read() {
-                let factor = if ev.y > 0.0 { 0.9 } else { 1.1 };
-                ortho.scale = (ortho.scale * factor).clamp(0.2, 10.0);
-            }
-            if let Ok(_window) = windows.single() {
-                for ev in cursor_evr.read() {
-                    if mouse.pressed(MouseButton::Left) {
-                        if let Some(prev) = *last_pos {
-                            let delta = ev.position - prev;
-                            tf.translation.x -= delta.x * ortho.scale;
-                            tf.translation.y += delta.y * ortho.scale;
-                        }
-                    }
-                    *last_pos = Some(ev.position);
-                }
-            }
-        }
+/// System to toggle which field is being visualized.
+fn toggle_viz_field(mut viz_field: ResMut<VizField>, keyboard_input: Res<ButtonInput<KeyCode>>) {
+    if keyboard_input.just_pressed(KeyCode::KeyE) {
+        *viz_field = VizField::Ez;
+        info!("Visualizing Ez field");
+    }
+    if keyboard_input.just_pressed(KeyCode::KeyH) {
+        *viz_field = VizField::Hx;
+        info!("Visualizing Hx field");
+    }
+    if keyboard_input.just_pressed(KeyCode::KeyY) {
+        *viz_field = VizField::Hy;
+        info!("Visualizing Hy field");
     }
 }
