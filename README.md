@@ -27,3 +27,7 @@ Maxwell's equations.
 ## $\nabla\times B = \mu_0(J+\epsilon_0\frac{\partial E}{\partial t})$ (Amperer's Law)
 
 <br>
+
+# 외국 영상
+
+- [(250806)전자기학을 FPS 게임으로 바꾸었다 Wunoumenal](https://youtu.be/7i_dwP2n90M?si=kHiZ-P_kYzyHGjB8)
