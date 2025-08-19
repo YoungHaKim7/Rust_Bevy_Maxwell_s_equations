@@ -29,6 +29,8 @@ Maxwell's equations.
 # (250628)세상에서 가장 쓸모 있는 10분⏱️ 전기자기학의 바탕을 만든 맥스웰의 4가지 방정식 진짜 쉽게 알려드리겠습니다! | EBS 지식
 - https://youtu.be/Xv2CRGTFa8M?si=WN74RrEiK8vFZCSt
 
+- [Maxwell's Equations for Electromagnetism Explained in under a Minute!](https://youtube.com/shorts/LYytSXnSCOI?si=enan5I--Ih-H9Vr6)
+
 <hr />
 
 <br>
