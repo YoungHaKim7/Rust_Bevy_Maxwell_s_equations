@@ -31,6 +31,11 @@ Maxwell's equations.
 
 - [Maxwell's Equations for Electromagnetism Explained in under a Minute!](https://youtube.com/shorts/LYytSXnSCOI?si=enan5I--Ih-H9Vr6)
 
+- 7hr짜리 통합본(설 특집 풀버전) 김갑진 교수의 물리학 시리즈 (고전역학, 전자기학, 양자역학) [KAIST 김갑진 교수]
+  - https://youtu.be/q4NEhgLC8lA?si=B86so_F_DchQrDBt
+
+- [더 자세히 정리는 알고림즘 참고Algorithm_Training](https://github.com/YoungHaKim7/Algorithm_Training)
+
 <hr />
 
 <br>
